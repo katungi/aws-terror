@@ -51,7 +51,7 @@ func loadAWSConfig(region string) (aws.Config, error) {
 	return cfg, nil
 }
 
-func (c *Client) GetEC2InstanceConfig(instanceID string) (map[string]interface{}, error) {
+func (c *Client) GetEC2InstanceConfig(instanceID string) (map[string]any, error) {
 	ctx := context.Background()
 	
 	resp, err := c.ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
@@ -70,8 +70,8 @@ func (c *Client) GetEC2InstanceConfig(instanceID string) (map[string]interface{}
 	return c.mapInstanceToConfig(instance)
 }
 
-func (c *Client) mapInstanceToConfig(instance types.Instance) (map[string]interface{}, error) {
-	config := make(map[string]interface{})
+func (c *Client) mapInstanceToConfig(instance types.Instance) (map[string]any, error) {
+	config := make(map[string]any)
 	
 	config["instance_type"] = string(instance.InstanceType)
 	config["ami"] = aws.ToString(instance.ImageId)
@@ -90,7 +90,7 @@ func (c *Client) mapInstanceToConfig(instance types.Instance) (map[string]interf
 	}
 	config["tags"] = tags
 
-	blockDevices := make([]map[string]interface{}, 0, len(instance.BlockDeviceMappings))
+	blockDevices := make([]map[string]any, 0, len(instance.BlockDeviceMappings))
 	for _, bdm := range instance.BlockDeviceMappings {
 		if bdm.Ebs != nil {
 			device := make(map[string]interface{})
@@ -115,7 +115,7 @@ func (c *Client) mapInstanceToConfig(instance types.Instance) (map[string]interf
 	return config, nil
 }
 
-func (c *Client) getVolumeInfo(volumeID string) (map[string]interface{}, error) {
+func (c *Client) getVolumeInfo(volumeID string) (map[string]any, error) {
 	ctx := context.Background()
 	
 	resp, err := c.ec2Client.DescribeVolumes(ctx, &ec2.DescribeVolumesInput{
@@ -131,7 +131,7 @@ func (c *Client) getVolumeInfo(volumeID string) (map[string]interface{}, error) 
 	}
 	
 	volume := resp.Volumes[0]
-	volumeInfo := make(map[string]interface{})
+	volumeInfo := make(map[string]any)
 	
 	volumeInfo["volume_size"] = volume.Size
 	volumeInfo["volume_type"] = string(volume.VolumeType)

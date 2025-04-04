@@ -16,7 +16,7 @@ func TestDetectDrift_NoDrift(t *testing.T) {
 		},
 	}
 
-	tfConfig := map[string]interface{}{
+	tfConfig := map[string]any{
 		"instance_type": "t2.micro",
 		"ami":           "ami-12345",
 		"tags": map[string]any{
@@ -64,12 +64,12 @@ func TestDetectDrift_WithDrift(t *testing.T) {
 }
 
 func TestDetectDrift_AttributeInAWSOnly(t *testing.T) {
-	awsConfig := map[string]interface{}{
+	awsConfig := map[string]any{
 		"instance_type": "t2.micro",
 		"ami":           "ami-12345",
 	}
 
-	tfConfig := map[string]interface{}{
+	tfConfig := map[string]any{
 		"instance_type": "t2.micro",
 		// ami is missing
 	}

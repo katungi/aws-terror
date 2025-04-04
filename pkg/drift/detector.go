@@ -7,7 +7,7 @@ import (
 )
 
 // DetectDrift compares AWS and Terraform configurations and returns differences
-func DetectDrift(awsConfig, tfConfig map[string]interface{}, attributesToCheck []string) (map[string]DriftDetail, error) {
+func DetectDrift(awsConfig, tfConfig map[string]any, attributesToCheck []string) (map[string]DriftDetail, error) {
 	drifts := make(map[string]DriftDetail)
 
 	for _, attr := range attributesToCheck {
@@ -56,11 +56,11 @@ type DriftDetail struct {
 	Attribute      string
 	InAWS          bool
 	InTerraform    bool
-	AWSValue       interface{}
-	TerraformValue interface{}
+	AWSValue       any
+	TerraformValue any
 }
 
-func getNestedValue(data map[string]interface{}, path string) (interface{}, bool) {
+func getNestedValue(data map[string]any, path string) (any, bool) {
 	if path == "" {
 		return nil, false
 	}
@@ -75,10 +75,10 @@ func getNestedValue(data map[string]interface{}, path string) (interface{}, bool
 			return nil, false
 		}
 		
-		next, ok := val.(map[string]interface{})
+		next, ok := val.(map[string]any)
 		if !ok {
 			if strMap, isStrMap := val.(map[string]string); isStrMap {
-				next = make(map[string]interface{})
+				next = make(map[string]any)
 				for k, v := range strMap {
 					next[k] = v
 				}
@@ -95,7 +95,7 @@ func getNestedValue(data map[string]interface{}, path string) (interface{}, bool
 	return val, ok
 }
 
-func compareValues(v1, v2 interface{}) bool {
+func compareValues(v1, v2 any) bool {
 	if v1 == nil && v2 == nil {
 		return true
 	}
@@ -106,15 +106,15 @@ func compareValues(v1, v2 interface{}) bool {
 	v1 = normalizeValue(v1)
 	v2 = normalizeValue(v2)
 
-	m1, isMap1 := v1.(map[string]interface{})
-	m2, isMap2 := v2.(map[string]interface{})
+	m1, isMap1 := v1.(map[string]any)
+	m2, isMap2 := v2.(map[string]any)
 	
 	if isMap1 && isMap2 {
 		return compareMaps(m1, m2)
 	}
 	
-	s1, isSlice1 := v1.([]interface{})
-	s2, isSlice2 := v2.([]interface{})
+	s1, isSlice1 := v1.([]any)
+	s2, isSlice2 := v2.([]any)
 	
 	if isSlice1 && isSlice2 {
 		return compareSlices(s1, s2)
@@ -123,7 +123,7 @@ func compareValues(v1, v2 interface{}) bool {
 	return reflect.DeepEqual(v1, v2)
 }
 
-func normalizeValue(v interface{}) interface{} {
+func normalizeValue(v any) any {
 	switch val := v.(type) {
 	case int:
 		return float64(val)
@@ -139,13 +139,13 @@ func normalizeValue(v interface{}) interface{} {
 		return float64(val)
 	case map[string]string:
 
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		for k, v := range val {
 			result[k] = v
 		}
 		return result
 	case []string:
-		result := make([]interface{}, len(val))
+		result := make([]any, len(val))
 		for i, v := range val {
 			result[i] = v
 		}
@@ -155,7 +155,7 @@ func normalizeValue(v interface{}) interface{} {
 	}
 }
 
-func compareMaps(m1, m2 map[string]interface{}) bool {
+func compareMaps(m1, m2 map[string]any) bool {
 	if len(m1) != len(m2) {
 		return false
 	}
@@ -174,12 +174,12 @@ func compareMaps(m1, m2 map[string]interface{}) bool {
 	return true
 }
 
-func compareSlices(s1, s2 []interface{}) bool {
+func compareSlices(s1, s2 []any) bool {
 	if len(s1) != len(s2) {
 		return false
 	}
 	
-	s2Copy := make([]interface{}, len(s2))
+	s2Copy := make([]any, len(s2))
 	copy(s2Copy, s2)
 	
 	for _, v1 := range s1 {

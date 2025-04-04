@@ -37,56 +37,114 @@ to quickly create a Cobra application.`,
 			logger.Fatalf("Failed to initialize AWS client: %v", err)
 		}
 
-		// Fetch EC2 instance configuration from AWS
-		logger.Infof("Fetching EC2 instance %s configuration from AWS...", instanceID)
-		awsConfig, err := awsClient.GetEC2InstanceConfig(instanceID)
-		if err != nil {
-			logger.Fatalf("Failed to get EC2 instance config: %v", err)
+		// Create channels for results and errors
+		resultsChan := make(chan struct {
+			instanceID string
+			drifts     map[string]drift.DriftDetail
+			err        error
+		}, len(instanceIDs))
+
+		// Process instances concurrently with worker pool
+		workerPool := make(chan struct{}, maxConcurrency)
+		for _, id := range instanceIDs {
+			workerPool <- struct{}{} // Acquire worker
+			go func(instanceID string) {
+				defer func() { <-workerPool }() // Release worker
+
+				// Fetch EC2 instance configuration from AWS
+				logger.Infof("Fetching EC2 instance %s configuration from AWS...", instanceID)
+				awsConfig, err := awsClient.GetEC2InstanceConfig(instanceID)
+				if err != nil {
+					resultsChan <- struct {
+						instanceID string
+						drifts     map[string]drift.DriftDetail
+						err        error
+					}{instanceID: instanceID, err: fmt.Errorf("failed to get EC2 instance config: %v", err)}
+					return
+				}
+
+				// Parse Terraform configuration
+				var tfConfig map[string]interface{}
+				if tfStatePath != "" {
+					tfConfig, err = terraform.ParseStateFile(tfStatePath, instanceID)
+				} else {
+					tfConfig, err = terraform.ParseHCLConfig(tfConfigPath, instanceID)
+				}
+
+				if err != nil {
+					resultsChan <- struct {
+						instanceID string
+						drifts     map[string]drift.DriftDetail
+						err        error
+					}{instanceID: instanceID, err: fmt.Errorf("failed to parse Terraform configuration: %v", err)}
+					return
+				}
+
+				// Detect drift
+				drifts, err := drift.DetectDrift(awsConfig, tfConfig, attributesToCheck)
+				resultsChan <- struct {
+					instanceID string
+					drifts     map[string]drift.DriftDetail
+					err        error
+				}{instanceID: instanceID, drifts: drifts, err: err}
+			}(id)
 		}
 
-		// Parse Terraform configuration
-		var tfConfig map[string]interface{}
-		if tfStatePath != "" {
-			logger.Infof("Parsing Terraform state file: %s", tfStatePath)
-			tfConfig, err = terraform.ParseStateFile(tfStatePath, instanceID)
-		} else {
-			logger.Infof("Parsing Terraform HCL configuration: %s", tfConfigPath)
-			tfConfig, err = terraform.ParseHCLConfig(tfConfigPath, instanceID)
-		}
-
-		if err != nil {
-			logger.Fatalf("Failed to parse Terraform configuration: %v", err)
-		}
-
-		// Detect drift
-		logger.Info("Detecting configuration drift...")
-		drifts, err := drift.DetectDrift(awsConfig, tfConfig, attributesToCheck)
-		if err != nil {
-			logger.Fatalf("Error detecting drift: %v", err)
-		}
-
-		// Output results
-		result := output.FormatDriftResults(drifts, instanceID, outputFormat)
-		fmt.Println(result)
-
-		if len(drifts) > 0 {
-			attributes := make([]string, 0, len(drifts))
-			for attr := range drifts {
-				attributes = append(attributes, attr)
+		// Collect and process results
+		var hasErrors bool
+		for i := 0; i < len(instanceIDs); i++ {
+			result := <-resultsChan
+			if result.err != nil {
+				logger.Errorf("Error processing instance %s: %v", result.instanceID, result.err)
+				hasErrors = true
+				continue
 			}
-			logger.Warnf("Drift detected in %d attributes: %s", len(drifts), strings.Join(attributes, ", "))
-		} else {
-			logger.Info("No drift detected! AWS and Terraform configurations are in sync.")
+
+			// Output results for each instance
+			fmt.Printf("\nResults for instance %s:\n", result.instanceID)
+			output := output.FormatDriftResults(result.drifts, result.instanceID, outputFormat)
+			fmt.Println(output)
+
+			if len(result.drifts) > 0 {
+				attributes := make([]string, 0, len(result.drifts))
+				for attr := range result.drifts {
+					attributes = append(attributes, attr)
+				}
+				logger.Warnf("Instance %s: Drift detected in %d attributes: %s",
+					result.instanceID, len(result.drifts), strings.Join(attributes, ", "))
+			} else {
+				logger.Infof("Instance %s: No drift detected", result.instanceID)
+			}
+		}
+
+		if hasErrors {
+			logger.Fatal("One or more instances failed to process")
 		}
 	},
+}
+
+var (
+	instanceIDs       []string
+	maxConcurrency    int
+	defaultAttributes = []string{
+		"instance_type",
+		"ami",
+		"subnet_id",
+		"vpc_security_group_ids",
+		"associate_public_ip_address",
+		"tags",
+		"root_block_device",
+		"ebs_block_device",
 	}
+)
 
 func init() {
 	rootCmd.AddCommand(driftCmd)
-	driftCmd.Flags().StringVarP(&instanceID, "instance", "i", "", "EC2 instance ID to check (required)")
+	driftCmd.Flags().StringSliceVarP(&instanceIDs, "instances", "i", nil, "EC2 instance IDs to check (required, comma-separated)")
 	driftCmd.Flags().StringVarP(&tfStatePath, "state", "s", "", "Path to Terraform state file")
 	driftCmd.Flags().StringVarP(&tfConfigPath, "config", "c", "", "Path to Terraform HCL configuration directory")
-	driftCmd.Flags().StringSliceVarP(&attributesToCheck, "attributes", "a", attributesToCheck, "Attributes to check for drift (comma-separated)")
+	driftCmd.Flags().StringSliceVarP(&attributesToCheck, "attributes", "a", defaultAttributes, "Attributes to check for drift (comma-separated)")
+	driftCmd.Flags().IntVarP(&maxConcurrency, "concurrency", "n", 5, "Maximum number of concurrent instance checks")
 
-	driftCmd.MarkFlagRequired("instance")
+	driftCmd.MarkFlagRequired("instances")
 }
