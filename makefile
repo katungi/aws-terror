@@ -1,7 +1,7 @@
 # Makefile for aws-terror
 
 # Variables
-BINARY_NAME=terror
+BINARY_NAME=aws-terror
 VERSION=$(shell git describe --tags --always --dirty)
 BUILD_DATE=$(shell date +%FT%T%z)
 GIT_COMMIT=$(shell git rev-parse --short HEAD)

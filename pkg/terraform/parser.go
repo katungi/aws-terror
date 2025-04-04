@@ -1,70 +1,91 @@
-// Package terraform provides functionality for parsing and extracting information from
-// Terraform state files and HCL configuration files.
 package terraform
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
+	"github.com/katungi/aws-terror/pkg/progress"
+	"github.com/zclconf/go-cty/cty"
 
 	"encoding/json"
 
 	tfjson "github.com/hashicorp/terraform-json"
 )
 
-// ParseStateFile reads and parses a Terraform state file to extract configuration
-// for a specific EC2 instance identified by its instance ID.
-// It returns the instance's configuration as a map or an error if the instance
-// is not found or if there are any parsing issues.
-func ParseStateFile(filepath, instanceID string) (map[string]interface{}, error) {
+func ParseStateFile(filepath, instanceID string) (map[string]any, error) {
 	if filepath == "" || instanceID == "" {
 		return nil, fmt.Errorf("filepath and instanceID must not be empty")
 	}
 
-	data, err := ioutil.ReadFile(filepath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read state file: %w", err)
-	}
+	// Initialize progress spinner
+	s := progress.NewSpinner("Parsing Terraform state file")
+	s.Start()
+	defer s.Stop()
 
-	var state tfjson.State
-	if err := json.Unmarshal(data, &state); err != nil {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open state file: %w", err)
+	}
+	defer file.Close()
+
+	// Parse raw JSON first to handle the actual state file structure
+	var rawState map[string]any
+	if err := json.NewDecoder(file).Decode(&rawState); err != nil {
+		s.Error(fmt.Sprintf("Failed to parse state file: %v", err))
 		return nil, fmt.Errorf("failed to parse state file: %w", err)
 	}
+	s.UpdateMessage("Analyzing state file contents")
 
-	if state.Values == nil || state.Values.RootModule == nil {
-		return nil, fmt.Errorf("invalid state file: no root module found")
+	// Navigate through the state structure
+	resources, ok := rawState["resources"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("invalid state file: resources not found or invalid format")
 	}
 
-	// find the resource for the given instance ID
-	for _, resource := range state.Values.RootModule.Resources {
-		if resource.Type == "aws_instance" {
-			if resource.AttributeValues != nil {
-				if idVal, ok := resource.AttributeValues["id"].(string); ok && idVal == instanceID {
-					return resource.AttributeValues, nil
-				}
+	// Iterate through resources to find the matching instance
+	for _, res := range resources {
+		resource, ok := res.(map[string]any)
+		if !ok {
+			continue
+		}
+
+		// Check if this is an AWS instance resource
+		if resourceType, ok := resource["type"].(string); ok && resourceType == "aws_instance" {
+			// Check the instances array
+			instances, ok := resource["instances"].([]any)
+			if !ok || len(instances) == 0 {
+				continue
+			}
+
+			// Look at the first instance (usually there's only one)
+			instance, ok := instances[0].(map[string]any)
+			if !ok {
+				continue
+			}
+
+			// Get the attributes
+			attributes, ok := instance["attributes"].(map[string]any)
+			if !ok {
+				continue
+			}
+
+			// Check if this is the instance we're looking for
+			if id, ok := attributes["id"].(string); ok && id == instanceID {
+				s.Success("Successfully parsed Terraform state file")
+	return attributes, nil
 			}
 		}
 	}
 
-	// check in child mods if not in root
-	for _, module := range state.Values.RootModule.ChildModules {
-		config := findResourceInModule(module, instanceID)
-		if config != nil {
-			return config, nil
-		}
-	}
-
+	s.Error(fmt.Sprintf("Instance %s not found in Terraform state", instanceID))
 	return nil, fmt.Errorf("instance %s not found in Terraform state", instanceID)
 }
 
-// findResourceInModule recursively searches for an EC2 instance resource in a Terraform module
-// and its child modules. It returns the instance's configuration if found, or nil if not found.
-func findResourceInModule(module *tfjson.StateModule, instanceID string) map[string]interface{} {
+func findResourceInModule(module *tfjson.StateModule, instanceID string) map[string]any {
 	if module == nil || instanceID == "" {
 		return nil
 	}
@@ -89,10 +110,7 @@ func findResourceInModule(module *tfjson.StateModule, instanceID string) map[str
 	return nil
 }
 
-// ParseHCLConfig parses Terraform HCL configuration files and extracts configuration
-// for a specific EC2 instance identified by its instance ID.
-// It can handle both single .tf files and directories containing multiple .tf files.
-func ParseHCLConfig(configPath, instanceID string) (map[string]interface{}, error) {
+func ParseHCLConfig(configPath, instanceID string) (map[string]any, error) {
 	if configPath == "" || instanceID == "" {
 		return nil, fmt.Errorf("configPath and instanceID must not be empty")
 	}
@@ -110,7 +128,11 @@ func ParseHCLConfig(configPath, instanceID string) (map[string]interface{}, erro
 				return err
 			}
 			if !info.IsDir() && strings.HasSuffix(info.Name(), ".tf") {
-				configFiles = append(configFiles, path)
+				absPath, err := filepath.Abs(path)
+				if err != nil {
+					return err
+				}
+				configFiles = append(configFiles, absPath)
 			}
 			return nil
 		})
@@ -122,7 +144,11 @@ func ParseHCLConfig(configPath, instanceID string) (map[string]interface{}, erro
 		if !strings.HasSuffix(configPath, ".tf") {
 			return nil, fmt.Errorf("config file must have .tf extension")
 		}
-		configFiles = []string{configPath}
+		absPath, err := filepath.Abs(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get absolute path: %w", err)
+		}
+		configFiles = []string{absPath}
 	}
 
 	if len(configFiles) == 0 {
@@ -146,14 +172,13 @@ func ParseHCLConfig(configPath, instanceID string) (map[string]interface{}, erro
 	return config, nil
 }
 
-// extractInstanceConfig extracts configuration for a specific instance from parsed HCL
-// by looking for aws_instance resources with matching tags.
-func extractInstanceConfig(parser *hclparse.Parser, instanceID string) (map[string]interface{}, error) {
+func extractInstanceConfig(parser *hclparse.Parser, instanceID string) (map[string]any, error) {
+	fmt.Println("....Parsing......")
 	if parser == nil || instanceID == "" {
 		return nil, fmt.Errorf("parser and instanceID must not be nil")
 	}
 
-	config := make(map[string]interface{})
+	config := make(map[string]any)
 
 	// Get all parsed files
 	files := parser.Files()
@@ -179,7 +204,7 @@ func extractInstanceConfig(parser *hclparse.Parser, instanceID string) (map[stri
 		})
 
 		if diags.HasErrors() {
-			return nil, fmt.Errorf("error getting content: %v", diags)
+			continue // Skip files with parsing errors instead of failing
 		}
 
 		// Look for aws_instance resources
@@ -191,21 +216,39 @@ func extractInstanceConfig(parser *hclparse.Parser, instanceID string) (map[stri
 					continue
 				}
 
-				// Look for tags to match instance ID
-				if tagsAttr, exists := attrs["tags"]; exists {
-					tagsVal, diags := tagsAttr.Expr.Value(nil)
-					if !diags.HasErrors() && tagsVal.Type().IsMapType() {
-						tagsMap := tagsVal.AsValueMap()
-						if idTag, ok := tagsMap["Name"]; ok && idTag.AsString() == instanceID {
-							// Found matching instance, extract all attributes
-							for name, attr := range attrs {
-								val, diags := attr.Expr.Value(nil)
-								if !diags.HasErrors() {
+				// Check for instance ID in the id attribute
+				if idAttr, exists := attrs["id"]; exists {
+					idVal, diags := idAttr.Expr.Value(nil)
+					if !diags.HasErrors() && idVal.Type() == cty.String && idVal.AsString() == instanceID {
+						// Found matching instance, extract all attributes
+						for name, attr := range attrs {
+							val, diags := attr.Expr.Value(nil)
+							if !diags.HasErrors() {
+								switch {
+								case val.Type() == cty.String:
+									config[name] = val.AsString()
+								case val.Type().IsMapType() || val.Type().IsObjectType():
+									tagsMap := make(map[string]interface{})
+									if val.Type().IsMapType() {
+										for k, v := range val.AsValueMap() {
+											tagsMap[k] = v.AsString()
+										}
+									} else {
+										for k, v := range val.AsValueMap() {
+											tagsMap[k] = v.AsString()
+										}
+									}
+									config[name] = tagsMap
+								case val.Type() == cty.Number:
+									config[name] = val.AsBigFloat()
+								case val.Type() == cty.Bool:
+									config[name] = val.True()
+								default:
 									config[name] = val.AsString()
 								}
 							}
-							return config, nil
 						}
+						return config, nil
 					}
 				}
 			}

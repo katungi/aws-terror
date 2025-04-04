@@ -4,9 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
-
-	tfjson "github.com/hashicorp/terraform-json"
 )
 
 func TestParseStateFile(t *testing.T) {
@@ -16,20 +15,28 @@ func TestParseStateFile(t *testing.T) {
 
 	tests := []struct {
 		name           string
-		stateContent   *tfjson.State
+		stateContent   map[string]any
 		instanceID     string
-		expectedConfig map[string]interface{}
+		expectedConfig map[string]any
 		expectError    bool
 	}{
 		{
 			name: "Successfully parse state file",
-			stateContent: &tfjson.State{
-				Values: &tfjson.StateValues{
-					RootModule: &tfjson.StateModule{
-						Resources: []*tfjson.StateResource{
-							{
-								Type: "aws_instance",
-								AttributeValues: map[string]interface{}{
+			stateContent: map[string]any{
+				"version": 4,
+				"terraform_version": "1.0.0",
+				"serial": 1,
+				"lineage": "example",
+				"outputs": map[string]any{},
+				"resources": []any{
+					map[string]any{
+						"mode": "managed",
+						"type": "aws_instance",
+						"name": "test_instance",
+						"provider": "provider[\"registry.terraform.io/hashicorp/aws\"]",
+						"instances": []any{
+							map[string]any{
+								"attributes": map[string]any{
 									"id":            "i-1234567890abcdef0",
 									"instance_type": "t2.micro",
 									"ami":           "ami-123",
@@ -40,7 +47,7 @@ func TestParseStateFile(t *testing.T) {
 				},
 			},
 			instanceID: "i-1234567890abcdef0",
-			expectedConfig: map[string]interface{}{
+			expectedConfig: map[string]any{
 				"id":            "i-1234567890abcdef0",
 				"instance_type": "t2.micro",
 				"ami":           "ami-123",
@@ -48,12 +55,13 @@ func TestParseStateFile(t *testing.T) {
 		},
 		{
 			name: "Instance not found in state",
-			stateContent: &tfjson.State{
-				Values: &tfjson.StateValues{
-					RootModule: &tfjson.StateModule{
-						Resources: []*tfjson.StateResource{},
-					},
-				},
+			stateContent: map[string]any{
+				"version": 4,
+				"terraform_version": "1.0.0",
+				"serial": 1,
+				"lineage": "example",
+				"outputs": map[string]any{},
+				"resources": []any{},
 			},
 			instanceID:  "i-nonexistent",
 			expectError: true,
@@ -94,7 +102,7 @@ func TestParseStateFile(t *testing.T) {
 					continue
 				}
 
-				if expectedValue != actualValue {
+				if !reflect.DeepEqual(expectedValue, actualValue) {
 					t.Errorf("for key %s, expected %v but got %v", key, expectedValue, actualValue)
 				}
 			}
@@ -110,7 +118,7 @@ func TestParseHCLConfig(t *testing.T) {
 		name           string
 		hclContent     string
 		instanceID     string
-		expectedConfig map[string]interface{}
+		expectedConfig map[string]any
 		expectError    bool
 	}{
 		{
@@ -119,16 +127,18 @@ func TestParseHCLConfig(t *testing.T) {
 			resource "aws_instance" "test" {
 				instance_type = "t2.micro"
 				ami           = "ami-123"
+				id            = "test-instance"
 				tags = {
 					Name = "test-instance"
 				}
 			}
 			`,
 			instanceID: "test-instance",
-			expectedConfig: map[string]interface{}{
-				"instance_type": "t2.micro",
-				"ami":           "ami-123",
-				"tags":          map[string]interface{}{"Name": "test-instance"},
+			expectedConfig: map[string]any{
+				"instance_type": any("t2.micro"),
+				"ami":           any("ami-123"),
+				"id":            any("test-instance"),
+				"tags":          map[string]any{"Name": any("test-instance")},
 			},
 		},
 	}
@@ -164,7 +174,7 @@ func TestParseHCLConfig(t *testing.T) {
 					continue
 				}
 
-				if expectedValue != actualValue {
+				if !reflect.DeepEqual(expectedValue, actualValue) {
 					t.Errorf("for key %s, expected %v but got %v", key, expectedValue, actualValue)
 				}
 			}

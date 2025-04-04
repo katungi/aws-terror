@@ -15,25 +15,25 @@ func DetectDrift(awsConfig, tfConfig map[string]any, attributesToCheck []string)
 		tfValue, tfExists := getNestedValue(tfConfig, attr)
 
 		if !awsExists && !tfExists {
-			continue 
+			continue
 		}
-		
+
 		if !awsExists {
 			drifts[attr] = DriftDetail{
-				Attribute: attr,
-				InAWS:     false,
-				InTerraform: true,
+				Attribute:      attr,
+				InAWS:          false,
+				InTerraform:    true,
 				TerraformValue: tfValue,
 			}
 			continue
 		}
-		
+
 		if !tfExists {
 			drifts[attr] = DriftDetail{
-				Attribute: attr,
-				InAWS:     true,
+				Attribute:   attr,
+				InAWS:       true,
 				InTerraform: false,
-				AWSValue: awsValue,
+				AWSValue:    awsValue,
 			}
 			continue
 		}
@@ -67,14 +67,14 @@ func getNestedValue(data map[string]any, path string) (any, bool) {
 
 	parts := strings.Split(path, ".")
 	current := data
-	
+
 	for i := 0; i < len(parts)-1; i++ {
 		part := parts[i]
 		val, ok := current[part]
 		if !ok {
 			return nil, false
 		}
-		
+
 		next, ok := val.(map[string]any)
 		if !ok {
 			if strMap, isStrMap := val.(map[string]string); isStrMap {
@@ -83,10 +83,10 @@ func getNestedValue(data map[string]any, path string) (any, bool) {
 					next[k] = v
 				}
 			} else {
-				return nil, false 
+				return nil, false
 			}
 		}
-		
+
 		current = next
 	}
 
@@ -108,18 +108,18 @@ func compareValues(v1, v2 any) bool {
 
 	m1, isMap1 := v1.(map[string]any)
 	m2, isMap2 := v2.(map[string]any)
-	
+
 	if isMap1 && isMap2 {
 		return compareMaps(m1, m2)
 	}
-	
+
 	s1, isSlice1 := v1.([]any)
 	s2, isSlice2 := v2.([]any)
-	
+
 	if isSlice1 && isSlice2 {
 		return compareSlices(s1, s2)
 	}
-	
+
 	return reflect.DeepEqual(v1, v2)
 }
 
@@ -159,18 +159,18 @@ func compareMaps(m1, m2 map[string]any) bool {
 	if len(m1) != len(m2) {
 		return false
 	}
-	
+
 	for k, v1 := range m1 {
 		v2, ok := m2[k]
 		if !ok {
 			return false
 		}
-		
+
 		if !compareValues(v1, v2) {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
@@ -178,10 +178,10 @@ func compareSlices(s1, s2 []any) bool {
 	if len(s1) != len(s2) {
 		return false
 	}
-	
+
 	s2Copy := make([]any, len(s2))
 	copy(s2Copy, s2)
-	
+
 	for _, v1 := range s1 {
 		found := false
 		for i, v2 := range s2Copy {
@@ -191,20 +191,20 @@ func compareSlices(s1, s2 []any) bool {
 				break
 			}
 		}
-		
+
 		if !found {
 			return false
 		}
 	}
-	
+
 	return true
 }
 
 func (d DriftDetail) String() string {
 	var sb strings.Builder
-	
+
 	sb.WriteString(fmt.Sprintf("Attribute: %s\n", d.Attribute))
-	
+
 	if d.InAWS && d.InTerraform {
 		sb.WriteString("Status: Values differ between AWS and Terraform\n")
 		sb.WriteString(fmt.Sprintf("AWS value: %v\n", d.AWSValue))
@@ -216,6 +216,6 @@ func (d DriftDetail) String() string {
 		sb.WriteString("Status: Exists in Terraform but not in AWS\n")
 		sb.WriteString(fmt.Sprintf("Terraform value: %v\n", d.TerraformValue))
 	}
-	
+
 	return sb.String()
 }

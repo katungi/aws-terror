@@ -135,6 +135,15 @@ Metrics are exposed via a Prometheus endpoint for monitoring and alerting.
    - Challenge: Managing concurrent AWS API calls and resource usage
    - Solution: Implemented rate limiting and connection pooling
 
+## Sample Files
+
+Example configuration files are provided in the `samples/` directory:
+
+- `samples/instance.tf` - Example Terraform configuration for an EC2 instance
+- `samples/terraform.tfstate` - Sample Terraform state file showing the expected structure
+
+These samples demonstrate the structure of data that AWS-Terror compares when detecting drift, including instance attributes like type, AMI, security groups, tags, and block device mappings.
+
 ## Dependencies
 
 - [AWS SDK for Go](https://github.com/aws/aws-sdk-go-v2) - AWS API integration
