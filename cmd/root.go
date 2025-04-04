@@ -29,7 +29,6 @@ func Execute() error {
 }
 
 func init() {
-	// Global flags
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().StringVar(&awsRegion, "region", "", "AWS region (defaults to AWS_REGION env var)")
 	rootCmd.PersistentFlags().StringVar(&outputFormat, "output", "text", "Output format (text, json, yaml)")
