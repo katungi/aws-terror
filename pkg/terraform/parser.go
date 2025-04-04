@@ -1,3 +1,5 @@
+// Package terraform provides functionality for parsing and extracting information from
+// Terraform state files and HCL configuration files.
 package terraform
 
 import (
@@ -15,9 +17,16 @@ import (
 	tfjson "github.com/hashicorp/terraform-json"
 )
 
+// ParseStateFile reads and parses a Terraform state file to extract configuration
+// for a specific EC2 instance identified by its instance ID.
+// It returns the instance's configuration as a map or an error if the instance
+// is not found or if there are any parsing issues.
 func ParseStateFile(filepath, instanceID string) (map[string]interface{}, error) {
-	data, err := ioutil.ReadFile(filepath)
+	if filepath == "" || instanceID == "" {
+		return nil, fmt.Errorf("filepath and instanceID must not be empty")
+	}
 
+	data, err := ioutil.ReadFile(filepath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read state file: %w", err)
 	}
@@ -51,10 +60,15 @@ func ParseStateFile(filepath, instanceID string) (map[string]interface{}, error)
 	}
 
 	return nil, fmt.Errorf("instance %s not found in Terraform state", instanceID)
-
 }
 
+// findResourceInModule recursively searches for an EC2 instance resource in a Terraform module
+// and its child modules. It returns the instance's configuration if found, or nil if not found.
 func findResourceInModule(module *tfjson.StateModule, instanceID string) map[string]interface{} {
+	if module == nil || instanceID == "" {
+		return nil
+	}
+
 	for _, resource := range module.Resources {
 		if resource.Type == "aws_instance" {
 			if resource.AttributeValues != nil {
@@ -75,8 +89,14 @@ func findResourceInModule(module *tfjson.StateModule, instanceID string) map[str
 	return nil
 }
 
-// ParseHCLConfig parses Terraform HCL configuration files
+// ParseHCLConfig parses Terraform HCL configuration files and extracts configuration
+// for a specific EC2 instance identified by its instance ID.
+// It can handle both single .tf files and directories containing multiple .tf files.
 func ParseHCLConfig(configPath, instanceID string) (map[string]interface{}, error) {
+	if configPath == "" || instanceID == "" {
+		return nil, fmt.Errorf("configPath and instanceID must not be empty")
+	}
+
 	fileInfo, err := os.Stat(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat config path: %w", err)
@@ -99,6 +119,9 @@ func ParseHCLConfig(configPath, instanceID string) (map[string]interface{}, erro
 		}
 	} else {
 		// Single file
+		if !strings.HasSuffix(configPath, ".tf") {
+			return nil, fmt.Errorf("config file must have .tf extension")
+		}
 		configFiles = []string{configPath}
 	}
 
@@ -124,7 +147,12 @@ func ParseHCLConfig(configPath, instanceID string) (map[string]interface{}, erro
 }
 
 // extractInstanceConfig extracts configuration for a specific instance from parsed HCL
+// by looking for aws_instance resources with matching tags.
 func extractInstanceConfig(parser *hclparse.Parser, instanceID string) (map[string]interface{}, error) {
+	if parser == nil || instanceID == "" {
+		return nil, fmt.Errorf("parser and instanceID must not be nil")
+	}
+
 	config := make(map[string]interface{})
 
 	// Get all parsed files

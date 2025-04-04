@@ -3,12 +3,16 @@ package aws
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/sirupsen/logrus"
+
+	"github.com/katungi/aws-terror/pkg/metrics"
 )
 
 type Client struct {
@@ -51,21 +55,34 @@ func loadAWSConfig(region string) (aws.Config, error) {
 	return cfg, nil
 }
 
-func (c *Client) GetEC2InstanceConfig(instanceID string) (map[string]any, error) {
-	ctx := context.Background()
-	
-	resp, err := c.ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-		InstanceIds: []string{instanceID},
-	})
-	
+func (c *Client) GetEC2InstanceConfig(ctx context.Context, instanceID string) (map[string]any, error) {
+	start := time.Now()
+	var resp *ec2.DescribeInstancesOutput
+	var err error
+
+	backoffConfig := backoff.NewExponentialBackOff()
+	backoffConfig.MaxElapsedTime = 30 * time.Second
+
+	operation := func() error {
+		resp, err = c.ec2Client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+			InstanceIds: []string{instanceID},
+		})
+		return err
+	}
+
+	err = backoff.Retry(operation, backoffConfig)
+
+	latency := time.Since(start).Seconds()
 	if err != nil {
+		metrics.RecordAWSAPICall("DescribeInstances", "error", latency)
 		return nil, fmt.Errorf("error describing instance %s: %w", instanceID, err)
 	}
-	
+	metrics.RecordAWSAPICall("DescribeInstances", "success", latency)
+
 	if len(resp.Reservations) == 0 || len(resp.Reservations[0].Instances) == 0 {
 		return nil, fmt.Errorf("instance %s not found", instanceID)
 	}
-	
+
 	instance := resp.Reservations[0].Instances[0]
 	return c.mapInstanceToConfig(instance)
 }

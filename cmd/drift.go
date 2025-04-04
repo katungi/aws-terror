@@ -1,5 +1,5 @@
 /*
-Copyright © 2025 NAME HERE <EMAIL ADDRESS>
+Copyright © 2025 Daniel Denis <dankatdennis@gmail.com>
 */
 package cmd
 
@@ -53,7 +53,7 @@ to quickly create a Cobra application.`,
 
 				// Fetch EC2 instance configuration from AWS
 				logger.Infof("Fetching EC2 instance %s configuration from AWS...", instanceID)
-				awsConfig, err := awsClient.GetEC2InstanceConfig(instanceID)
+awsConfig, err := awsClient.GetEC2InstanceConfig(cmd.Context(), instanceID)
 				if err != nil {
 					resultsChan <- struct {
 						instanceID string
