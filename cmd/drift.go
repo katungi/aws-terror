@@ -26,7 +26,8 @@ Cobra is a CLI library for Go that empowers applications.
 This application is a tool to generate the needed files
 to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if instanceID == "" {
+		instanceIDs, err := cmd.Flags().GetStringSlice("instances")
+		if err != nil || len(instanceIDs) == 0 {
 			globalSpinner.Error("Instance ID is required")
 			logger.Fatal("Instance ID is required")
 		}
@@ -41,14 +42,14 @@ to quickly create a Cobra application.`,
 				logger.Fatal("Both source and target state files are required for simulation mode")
 			}
 			globalSpinner.UpdateMessage("Starting drift simulation")
-			
-			drifts, err := terraform.SimulateDrift(tfStatePath, targetState, instanceID)
+
+			drifts, err := terraform.SimulateDrift(tfStatePath, targetState, instanceIDs[0])
 			if err != nil {
 				logger.Fatalf("Simulation failed: %v", err)
 			}
 
 			// Format and output results
-			formattedOutput := output.FormatDriftResults(drifts, instanceID, outputFormat)
+			formattedOutput := output.FormatDriftResults(drifts, instanceIDs[0], outputFormat)
 			fmt.Println(formattedOutput)
 			return
 		}
@@ -68,14 +69,6 @@ to quickly create a Cobra application.`,
 		}
 
 		// Create channels for results and errors
-		// Get instance IDs from flag
-		globalSpinner.UpdateMessage("Processing instance IDs")
-		instanceIDs, err := cmd.Flags().GetStringSlice("instances")
-		if err != nil {
-			globalSpinner.Error(fmt.Sprintf("Failed to get instance IDs: %v", err))
-			logger.Fatalf("Failed to get instance IDs: %v", err)
-		}
-
 		resultsChan := make(chan struct {
 			instanceID string
 			drifts     map[string]drift.DriftDetail
@@ -91,7 +84,7 @@ to quickly create a Cobra application.`,
 
 				// Fetch EC2 instance configuration from AWS
 				logger.Infof("Fetching EC2 instance %s configuration from AWS...", instanceID)
-awsConfig, err := awsClient.GetEC2InstanceConfig(cmd.Context(), instanceID)
+				awsConfig, err := awsClient.GetEC2InstanceConfig(cmd.Context(), instanceID)
 				if err != nil {
 					resultsChan <- struct {
 						instanceID string
@@ -130,7 +123,7 @@ awsConfig, err := awsClient.GetEC2InstanceConfig(cmd.Context(), instanceID)
 
 		// Collect and process results
 		var hasErrors bool
-		for i := 0; i < len(instanceIDs); i++ {
+		for range instanceIDs {
 			result := <-resultsChan
 			if result.err != nil {
 				logger.Errorf("Error processing instance %s: %v", result.instanceID, result.err)

@@ -11,6 +11,7 @@ import (
 )
 
 func main() {
+	fmt.Println("--------AWS Terror-------")
 	// Create a context that will be canceled on SIGINT or SIGTERM
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
